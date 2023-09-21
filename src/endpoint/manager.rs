@@ -222,6 +222,7 @@ impl EndpointManager {
 
     async fn run(&mut self, config: Config) {
         self.setup(&config).await;
+        let mut shutdown = false;
         while let Some(msg) = self.endpoint_rx.recv().await {
             match msg {
                 Message::ChannelClose => self.cleanup().await,
@@ -255,7 +256,14 @@ impl EndpointManager {
                         .await
                 }
                 Message::PublishReturn(_) => todo!(),
-                Message::Shutdown => break,
+                Message::Shutdown => {
+                    info!("Received shutdown signal. Waiting for pending messages to go");
+                    // TODO: cancel consumers
+                    shutdown = true;
+                }
+            }
+            if shutdown && self.pending_publishes.is_empty() {
+                break;
             }
         }
         self.cleanup().await

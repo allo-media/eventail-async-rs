@@ -1,3 +1,4 @@
+use log::debug;
 use serde::Serialize;
 
 use tokio::sync::mpsc::{error, unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -29,6 +30,8 @@ impl From<JoinError> for Error {
         Self::Shutdown(value)
     }
 }
+
+pub type Receiver = UnboundedReceiver<ClientMessage>;
 
 pub enum ClientMessage {
     ClockTicked(u64),
@@ -156,6 +159,7 @@ impl Endpoint {
         full_message: &str,
         conversation_id: &str,
     ) -> Result<(), Error> {
+        debug!("{}: {short_message}\n{full_message}", criticity.label());
         let payload = GelfPayload::new(
             criticity,
             short_message,
