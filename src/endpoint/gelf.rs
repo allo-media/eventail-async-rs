@@ -62,7 +62,7 @@ impl<'a> GelfPayload<'a> {
     ) -> Self {
         Self {
             version: "1.1",
-            short_message: short_message,
+            short_message,
             full_message,
             levelname: criticity.label(),
             level: criticity as u8,

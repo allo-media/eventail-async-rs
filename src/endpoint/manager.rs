@@ -14,10 +14,10 @@ use tokio::time::{interval, Duration, Instant};
 use super::shipment::Shipment;
 use super::{ClientMessage, Config};
 
-pub const EVENT_EXCHANGE: &'static str = "events";
-pub const COMMAND_EXCHANGE: &'static str = "commands";
-pub const CONFIG_EXCHANGE: &'static str = "configurations";
-pub const LOG_EXCHANGE: &'static str = "logs";
+pub const EVENT_EXCHANGE: &str = "events";
+pub const COMMAND_EXCHANGE: &str = "commands";
+pub const CONFIG_EXCHANGE: &str = "configurations";
+pub const LOG_EXCHANGE: &str = "logs";
 
 const COLD_DELAY: Duration = Duration::from_secs(30);
 
