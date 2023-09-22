@@ -2,37 +2,24 @@ use std::collections::BTreeMap;
 
 use amqprs::callbacks::{ChannelCallback, ConnectionCallback};
 use amqprs::channel::{
-    BasicPublishArguments, BasicQosArguments, Channel, ConfirmSelectArguments,
-    ExchangeDeclareArguments,
+    BasicQosArguments, Channel, ConfirmSelectArguments, ExchangeDeclareArguments,
 };
 use amqprs::connection::Connection;
 use amqprs::error::Error;
-use amqprs::BasicProperties;
 use async_trait::async_trait;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant};
 
+use super::shipment::Shipment;
 use super::{ClientMessage, Config};
 
-#[derive(Clone)]
-pub struct Shipment {
-    properties: BasicProperties,
-    args: BasicPublishArguments,
-    payload: Vec<u8>,
-    sent: Instant,
-}
+pub const EVENT_EXCHANGE: &str = "events";
+pub const COMMAND_EXCHANGE: &str = "commands";
+pub const CONFIG_EXCHANGE: &str = "configurations";
+pub const LOG_EXCHANGE: &str = "logs";
 
-impl Shipment {
-    pub fn new(properties: BasicProperties, args: BasicPublishArguments, payload: Vec<u8>) -> Self {
-        Self {
-            properties,
-            args,
-            payload,
-            sent: Instant::now(),
-        }
-    }
-}
+const COLD_DELAY: Duration = Duration::from_secs(30);
 
 pub enum Message {
     ChannelClose,
@@ -101,21 +88,21 @@ impl EndpointManager {
             .await?;
         main_channel
             .exchange_declare(
-                ExchangeDeclareArguments::new("events", "topic")
+                ExchangeDeclareArguments::new(EVENT_EXCHANGE, "topic")
                     .durable(true)
                     .finish(),
             )
             .await?;
         main_channel
             .exchange_declare(
-                ExchangeDeclareArguments::new("commands", "topic")
+                ExchangeDeclareArguments::new(COMMAND_EXCHANGE, "topic")
                     .durable(true)
                     .finish(),
             )
             .await?;
         main_channel
             .exchange_declare(
-                ExchangeDeclareArguments::new("configurations", "topic")
+                ExchangeDeclareArguments::new(CONFIG_EXCHANGE, "topic")
                     .durable(true)
                     .finish(),
             )
@@ -127,7 +114,7 @@ impl EndpointManager {
             .await?;
         main_channel
             .exchange_declare(
-                ExchangeDeclareArguments::new("logs", "topic")
+                ExchangeDeclareArguments::new(LOG_EXCHANGE, "topic")
                     .durable(true)
                     .finish(),
             )
@@ -136,6 +123,7 @@ impl EndpointManager {
         self.connection.replace(connection);
         self.main_channel.replace(main_channel);
         self.log_channel.replace(log_channel);
+        self.next_message_tag = 1;
         Ok(())
     }
 
@@ -161,6 +149,48 @@ impl EndpointManager {
             c.basic_publish(shipment.properties, shipment.payload, shipment.args)
                 .await
                 .unwrap_or_else(|e| warn!("Unable to publish on main: {e}; will retry later."))
+        }
+    }
+
+    fn publish_ack(&mut self, delivery_tag: u64, multiple: bool) {
+        debug!("publish confirm for {delivery_tag} (multiple {multiple})");
+        if multiple {
+            let kept = self.pending_publishes.split_off(&(delivery_tag + 1));
+            self.pending_publishes = kept;
+        } else {
+            self.pending_publishes.remove(&delivery_tag);
+        }
+        debug!(
+            "{} message(s) pending confirmation",
+            self.pending_publishes.len()
+        );
+    }
+
+    async fn publish_nack(&mut self, delivery_tag: u64, multiple: bool) {
+        debug!("re-publish rejected or old pending messages up to {delivery_tag} (multiple {multiple})");
+        if multiple {
+            let kept = self.pending_publishes.split_off(&(delivery_tag + 1));
+            let removed = std::mem::replace(&mut self.pending_publishes, kept);
+            debug!("{} message to resend", removed.len());
+            for shipment in removed.into_values() {
+                self.publish_main(shipment).await
+            }
+        } else if let Some(shipment) = self.pending_publishes.remove(&delivery_tag) {
+            self.publish_main(shipment).await
+        }
+    }
+
+    async fn refresh_pending_publishes(&mut self) {
+        debug!("refreshing pending confirms…");
+        let first_fresh_seqno = self.pending_publishes.iter().rev().find_map(|(d, s)| {
+            if s.sent.elapsed() >= COLD_DELAY {
+                Some(*d)
+            } else {
+                None
+            }
+        });
+        if let Some(seqno) = first_fresh_seqno {
+            self.publish_nack(seqno, true).await
         }
     }
 
@@ -192,6 +222,7 @@ impl EndpointManager {
 
     async fn run(&mut self, config: Config) {
         self.setup(&config).await;
+        let mut shutdown = false;
         while let Some(msg) = self.endpoint_rx.recv().await {
             match msg {
                 Message::ChannelClose => self.cleanup().await,
@@ -201,18 +232,38 @@ impl EndpointManager {
                     }
                     if t % 4 == 0 && self.connection.is_none() {
                         self.setup(&config).await;
+                        if self.connection.is_some() && !self.pending_publishes.is_empty() {
+                            self.publish_nack(
+                                *self.pending_publishes.last_key_value().unwrap().0,
+                                true,
+                            )
+                            .await;
+                        }
+                    }
+                    if t % 16 == 0 {
+                        self.refresh_pending_publishes().await
                     }
                 }
-                Message::ConnectionBlocked => todo!(),
+                Message::ConnectionBlocked => (), // TODO later
                 Message::ConnectionClose => self.cleanup().await,
-                Message::ConnectionUnblocked => todo!(),
+                Message::ConnectionUnblocked => (), // TODO later
                 Message::ConsumerCancel(_) => todo!(),
-                Message::PublishAck(_) => todo!(),
-                Message::PublishLog(_) => todo!(),
-                Message::PublishMain(_) => todo!(),
-                Message::PublishNack(_) => todo!(),
+                Message::PublishAck(ack) => self.publish_ack(ack.delivery_tag(), ack.mutiple()),
+                Message::PublishLog(shipment) => self.publish_log(*shipment).await,
+                Message::PublishMain(shipment) => self.publish_main(*shipment).await,
+                Message::PublishNack(nack) => {
+                    self.publish_nack(nack.delivery_tag(), nack.multiple())
+                        .await
+                }
                 Message::PublishReturn(_) => todo!(),
-                Message::Shutdown => break,
+                Message::Shutdown => {
+                    info!("Received shutdown signal. Waiting for pending messages to go");
+                    // TODO: cancel consumers
+                    shutdown = true;
+                }
+            }
+            if shutdown && self.pending_publishes.is_empty() {
+                break;
             }
         }
         self.cleanup().await
@@ -224,10 +275,10 @@ async fn clock(endpoint_tx: mpsc::UnboundedSender<Message>) {
     let mut uptime: u64 = 0;
     loop {
         clock.tick().await;
+        uptime += 1;
         if endpoint_tx.send(Message::ClockTicked(uptime)).is_err() {
             break;
         }
-        uptime += 1;
     }
 }
 
