@@ -15,6 +15,9 @@ async fn main() {
         prefetch_count: 3,
         logical_service: String::from("test_eventail_rs"),
         hosts,
+        event_subscriptions: vec![],
+        command_subscriptions: vec![],
+        configuration_subscriptions: vec![],
     };
     let (endpoint, _) = Endpoint::new(config);
     signal::ctrl_c().await.ok();

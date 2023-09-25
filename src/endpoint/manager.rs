@@ -2,15 +2,18 @@ use std::collections::BTreeMap;
 
 use amqprs::callbacks::{ChannelCallback, ConnectionCallback};
 use amqprs::channel::{
-    BasicQosArguments, Channel, ConfirmSelectArguments, ExchangeDeclareArguments,
+    BasicAckArguments, BasicConsumeArguments, BasicQosArguments, BasicRejectArguments, Channel,
+    ConfirmSelectArguments, ExchangeDeclareArguments, QueueBindArguments, QueueDeclareArguments,
 };
 use amqprs::connection::Connection;
+use amqprs::consumer::AsyncConsumer;
 use amqprs::error::Error;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant};
 
+use super::delivery::Delivery;
 use super::shipment::Shipment;
 use super::{ClientMessage, Config};
 
@@ -22,17 +25,24 @@ pub const LOG_EXCHANGE: &str = "logs";
 const COLD_DELAY: Duration = Duration::from_secs(30);
 
 pub enum Message {
+    AckDelivery(u64),
     ChannelClose,
     ClockTicked(u64),
+    CommandReceived(Box<Delivery>),
+    ConfigurationReceived(Box<Delivery>),
+    Configured,
     ConnectionBlocked,
     ConnectionClose,
     ConnectionUnblocked,
     ConsumerCancel(String),
+    EventReceived(Box<Delivery>),
+    NackDelivery(u64),
     PublishAck(amqprs::Ack),
     PublishLog(Box<Shipment>),
     PublishMain(Box<Shipment>),
     PublishNack(amqprs::Nack),
     PublishReturn(String),
+    RejectDelivery(u64),
     Shutdown,
 }
 
@@ -66,12 +76,14 @@ impl EndpointManager {
     }
 
     /// Setup connection and topology
-    async fn try_setup(&mut self, host: &str, prefetch_count: u16) -> Result<(), Error> {
+    async fn try_setup(&mut self, host: &str, config: &Config) -> Result<(), Error> {
+        debug!("Connecting…");
         let connection = Connection::open(&host.try_into().unwrap()).await?;
         connection
             .register_callback(ConnectionCallbackProxy::new(self.endpoint_tx.clone()))
             .await?;
 
+        debug!("opening and configuring main channel…");
         let main_channel = connection.open_channel(None).await?;
         main_channel
             .register_callback(ChannelCallbackProxy::new(self.endpoint_tx.clone()))
@@ -82,7 +94,7 @@ impl EndpointManager {
         main_channel
             .basic_qos(
                 BasicQosArguments::default()
-                    .prefetch_count(prefetch_count)
+                    .prefetch_count(config.prefetch_count)
                     .finish(),
             )
             .await?;
@@ -107,6 +119,36 @@ impl EndpointManager {
                     .finish(),
             )
             .await?;
+        debug!("Exchanges declared");
+
+        let (event_queue, _, _) = main_channel
+            .queue_declare(QueueDeclareArguments::durable_client_named(&format!(
+                "{}.events",
+                config.logical_service
+            )))
+            .await?
+            .unwrap();
+        let (cmd_queue, _, _) = main_channel
+            .queue_declare(QueueDeclareArguments::durable_client_named(&format!(
+                "{}.commands",
+                config.logical_service
+            )))
+            .await?
+            .unwrap();
+
+        for event in config.event_subscriptions.iter() {
+            main_channel
+                .queue_bind(QueueBindArguments::new(&event_queue, EVENT_EXCHANGE, event))
+                .await?;
+        }
+        for cmd in config.command_subscriptions.iter() {
+            main_channel
+                .queue_bind(QueueBindArguments::new(&cmd_queue, COMMAND_EXCHANGE, cmd))
+                .await?;
+        }
+        debug!("business queues and bindings declared");
+
+        // main_channel.flow(true).await?;
 
         let log_channel = connection.open_channel(None).await?;
         log_channel
@@ -119,11 +161,70 @@ impl EndpointManager {
                     .finish(),
             )
             .await?;
+        debug!("log channel and exchange declared");
 
         self.connection.replace(connection);
-        self.main_channel.replace(main_channel);
         self.log_channel.replace(log_channel);
         self.next_message_tag = 1;
+
+        if !config.configuration_subscriptions.is_empty() {
+            let (config_queue, _, _) = main_channel
+                .queue_declare(
+                    QueueDeclareArguments::exclusive_server_named()
+                        .auto_delete(true)
+                        .finish(),
+                )
+                .await?
+                .unwrap();
+            for conf in config.configuration_subscriptions.iter() {
+                main_channel
+                    .queue_bind(QueueBindArguments::new(
+                        &config_queue,
+                        CONFIG_EXCHANGE,
+                        conf,
+                    ))
+                    .await?;
+            }
+            debug!("configuration queue and binding declared");
+            main_channel
+                .basic_consume(
+                    Consumer::new(self.endpoint_tx.clone()),
+                    BasicConsumeArguments::new(&config_queue, ""),
+                )
+                .await?;
+            self.client_tx
+                .send(ClientMessage::WaitingForConfiguration)
+                .unwrap_or_else(|_| warn!("Client dropped!"));
+            debug!("Consuming configuration events");
+            self.main_channel.replace(main_channel);
+        } else {
+            self.main_channel.replace(main_channel);
+            self.start_consuming(config).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn start_consuming(&mut self, config: &Config) -> Result<(), Error> {
+        debug!("!!");
+        if let Some(ref main_channel) = self.main_channel {
+            debug!("setup business consumers");
+            main_channel
+                .basic_consume(
+                    Consumer::new(self.endpoint_tx.clone()),
+                    BasicConsumeArguments::new(&format!("{}.events", config.logical_service), ""),
+                )
+                .await?;
+            main_channel
+                .basic_consume(
+                    Consumer::new(self.endpoint_tx.clone()),
+                    BasicConsumeArguments::new(&format!("{}.commands", config.logical_service), ""),
+                )
+                .await?;
+        }
+        self.client_tx
+            .send(ClientMessage::Ready)
+            .unwrap_or_else(|_| warn!("Client dropped!"));
         Ok(())
     }
 
@@ -204,7 +305,7 @@ impl EndpointManager {
 
     async fn setup(&mut self, config: &Config) {
         for host in config.hosts.iter() {
-            if let Err(err) = self.try_setup(host, config.prefetch_count).await {
+            if let Err(err) = self.try_setup(host, config).await {
                 warn!(
                     "Unable to connect to {}: {err}",
                     host.split('@').last().unwrap()
@@ -220,11 +321,72 @@ impl EndpointManager {
         }
     }
 
+    async fn reject_delivery(&self, delivery_tag: u64, requeue: bool) {
+        if let Some(ref channel) = self.main_channel {
+            channel
+                .basic_reject(BasicRejectArguments {
+                    delivery_tag,
+                    requeue,
+                })
+                .await
+                .unwrap_or_else(|e| error!("unable to reject messages: {e}"))
+        }
+    }
+
+    async fn ack_delivery(&self, delivery_tag: u64) {
+        if let Some(ref channel) = self.main_channel {
+            channel
+                .basic_ack(BasicAckArguments {
+                    delivery_tag,
+                    multiple: false,
+                })
+                .await
+                .unwrap_or_else(|e| error!("unable to ack messages: {e}"))
+        }
+    }
+
+    async fn command_received(&self, delivery: Box<Delivery>) {
+        // check message consistency
+        if delivery.conversation_id().is_none() || delivery.correlation_id().is_none() {
+            error!("Missing conversation_id or correlation_id, rejecting command/result");
+            self.reject_delivery(delivery.tag(), false).await
+        }
+        if delivery.reply_to().is_some() {
+            self.client_tx
+                .send(ClientMessage::CommandReceived(delivery))
+                .unwrap_or_else(|_| warn!("Client dropped!"))
+        } else if delivery.status().is_some() {
+            self.client_tx
+                .send(ClientMessage::ResultReceived(delivery))
+                .unwrap_or_else(|_| warn!("Client dropped!"))
+        } else {
+            error!("Missing reply_to and status, rejecting command/result");
+            self.reject_delivery(delivery.tag(), false).await
+        }
+    }
+
+    async fn configuration_received(&self, delivery: Box<Delivery>) {
+        self.client_tx
+            .send(ClientMessage::ConfigurationReceived(delivery))
+            .unwrap_or_else(|_| warn!("Client dropped!"))
+    }
+
+    async fn event_received(&self, delivery: Box<Delivery>) {
+        if delivery.conversation_id().is_none() {
+            error!("Missing conversation_id, rejecting event");
+            self.reject_delivery(delivery.tag(), false).await
+        }
+        self.client_tx
+            .send(ClientMessage::EventReceived(delivery))
+            .unwrap_or_else(|_| warn!("Client dropped!"))
+    }
+
     async fn run(&mut self, config: Config) {
         self.setup(&config).await;
         let mut shutdown = false;
         while let Some(msg) = self.endpoint_rx.recv().await {
             match msg {
+                Message::AckDelivery(delivery_tag) => self.ack_delivery(delivery_tag).await,
                 Message::ChannelClose => self.cleanup().await,
                 Message::ClockTicked(t) => {
                     if self.client_tx.send(ClientMessage::ClockTicked(t)).is_err() {
@@ -244,10 +406,27 @@ impl EndpointManager {
                         self.refresh_pending_publishes().await
                     }
                 }
+                Message::CommandReceived(delivery) => self.command_received(delivery).await,
+                Message::ConfigurationReceived(delivery) => {
+                    self.configuration_received(delivery).await
+                }
+                Message::Configured => {
+                    if let Err(e) = self.start_consuming(&config).await {
+                        error!("Couldn't start consuming: {e}");
+                        self.cleanup().await
+                    }
+                }
                 Message::ConnectionBlocked => (), // TODO later
                 Message::ConnectionClose => self.cleanup().await,
                 Message::ConnectionUnblocked => (), // TODO later
-                Message::ConsumerCancel(_) => todo!(),
+                Message::ConsumerCancel(_) => {
+                    error!("Consumer cancelled! Disconnecting…");
+                    self.cleanup().await
+                }
+                Message::EventReceived(delivery) => self.event_received(delivery).await,
+                Message::NackDelivery(delivery_tag) => {
+                    self.reject_delivery(delivery_tag, true).await
+                }
                 Message::PublishAck(ack) => self.publish_ack(ack.delivery_tag(), ack.mutiple()),
                 Message::PublishLog(shipment) => self.publish_log(*shipment).await,
                 Message::PublishMain(shipment) => self.publish_main(*shipment).await,
@@ -255,7 +434,13 @@ impl EndpointManager {
                     self.publish_nack(nack.delivery_tag(), nack.multiple())
                         .await
                 }
-                Message::PublishReturn(_) => todo!(),
+                Message::PublishReturn(routing_key) => self
+                    .client_tx
+                    .send(ClientMessage::MessageReturned(routing_key))
+                    .unwrap_or_else(|_| warn!("Client dropped!")),
+                Message::RejectDelivery(delivery_tag) => {
+                    self.reject_delivery(delivery_tag, false).await
+                }
                 Message::Shutdown => {
                     info!("Received shutdown signal. Waiting for pending messages to go");
                     // TODO: cancel consumers
@@ -364,5 +549,35 @@ impl ChannelCallback for ChannelCallbackProxy {
         self.endpoint_tx
             .send(Message::PublishReturn(ret.routing_key().to_owned()))
             .ok();
+    }
+}
+
+struct Consumer {
+    endpoint_tx: mpsc::UnboundedSender<Message>,
+}
+
+impl Consumer {
+    fn new(endpoint_tx: mpsc::UnboundedSender<Message>) -> Self {
+        Self { endpoint_tx }
+    }
+}
+
+#[async_trait]
+impl AsyncConsumer for Consumer {
+    async fn consume(
+        &mut self,
+        _channel: &Channel,
+        deliver: amqprs::Deliver,
+        basic_properties: amqprs::BasicProperties,
+        content: Vec<u8>,
+    ) {
+        let factory = match deliver.exchange().as_str() {
+            CONFIG_EXCHANGE => Message::ConfigurationReceived,
+            EVENT_EXCHANGE => Message::EventReceived,
+            COMMAND_EXCHANGE => Message::CommandReceived,
+            _ => unreachable!(),
+        };
+        let message = factory(Box::new(Delivery::new(deliver, basic_properties, content)));
+        self.endpoint_tx.send(message).ok();
     }
 }
