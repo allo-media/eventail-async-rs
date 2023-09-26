@@ -4,12 +4,11 @@ use serde::Serialize;
 use tokio::sync::mpsc::{error, unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::{JoinError, JoinHandle};
 
-pub(crate) mod delivery;
 mod gelf;
 mod manager;
 pub(crate) mod shipment;
 
-pub use delivery::Delivery;
+pub use super::Delivery;
 pub use gelf::Criticity;
 use gelf::GelfPayload;
 use manager::{run, EndpointManager, Message};
@@ -197,7 +196,7 @@ impl Endpoint {
     }
 
     pub fn nack_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
-        self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
+        self.endpoint_tx.send(Message::NackDelivery(delivery_tag))?;
         Ok(())
     }
 

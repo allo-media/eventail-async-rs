@@ -8,6 +8,16 @@ pub struct Delivery {
     pub payload: Vec<u8>,
 }
 
+pub enum Error {
+    Deserialization(String),
+}
+
+impl<T: std::error::Error> From<T> for Error {
+    fn from(value: T) -> Self {
+        Error::Deserialization(value.to_string())
+    }
+}
+
 impl Delivery {
     pub fn new(deliver: Deliver, properties: BasicProperties, payload: Vec<u8>) -> Self {
         Self {
@@ -59,9 +69,7 @@ impl Delivery {
         self.properties.reply_to()
     }
 
-    pub fn deserialize_payload<'a, T: Deserialize<'a>>(
-        &'a self,
-    ) -> Result<T, Box<dyn std::error::Error>> {
+    pub fn deserialize_payload<'a, T: Deserialize<'a>>(&'a self) -> Result<T, Error> {
         if let Some("application/json") = self.properties.content_type().map(|s| s.as_str()) {
             Ok(serde_json::from_slice(&self.payload)?)
         } else {

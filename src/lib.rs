@@ -1,9 +1,6 @@
+pub mod delivery;
 pub mod endpoint;
-mod service;
+pub mod service;
 
+pub use delivery::Delivery;
 pub use endpoint::Endpoint;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-}
