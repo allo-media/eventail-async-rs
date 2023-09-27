@@ -1,5 +1,6 @@
 use std::env;
 
+use eventail::delivery::Error as DError;
 use eventail::endpoint::{ClientMessage as Message, Config, Criticity, Endpoint};
 use serde::Deserialize;
 use tokio::signal;
@@ -28,12 +29,12 @@ async fn consume(mut client_rx: UnboundedReceiver<Message>, endpoint: &Endpoint)
                             println!("Received Ping {:?}", ping);
                             endpoint.ack_delivery(delivery.tag()).ok();
                         }
-                        Err(e) => {
+                        Err(DError::Deserialization(msg)) => {
                             endpoint
                                 .log(
                                     Criticity::Critical,
                                     "Unable to deserialize payload",
-                                    &e.to_string(),
+                                    &msg,
                                     conversation_id,
                                 )
                                 .ok();

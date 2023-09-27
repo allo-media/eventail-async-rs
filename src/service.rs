@@ -37,7 +37,7 @@ pub trait Service {
 
 pub async fn run_service<T: Service>(
     mut service: T,
-    endpoint: Endpoint,
+    endpoint: &Endpoint,
     mut client_rx: UnboundedReceiver<Message>,
 ) {
     while let Some(message) = client_rx.recv().await {
