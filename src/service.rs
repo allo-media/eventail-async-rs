@@ -1,9 +1,16 @@
+//! Callback API and helpers for implementing services.
+//!
+
+
 use log::error;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::delivery::{Delivery, Error as DError};
 use super::endpoint::{ClientMessage as Message, Criticity, Endpoint, Error as EError};
 
+/// Error type for message handlers.
+/// In case of recoverable error, the error is logged and the message is requeued (only once).
+/// In case of critical errer, the error is logged and the message is rejected to the dead-letter.
 pub enum Error {
     Recoverable(String),
     Critical(String),
@@ -17,24 +24,45 @@ impl From<DError> for Error {
     }
 }
 
-/// The traditional
+/// The traditional Callback API
+///
+/// A service should be run with [`run_service`].
 pub trait Service {
+    /// Called when the Endpoint starts consuming the subscribed messages.
     fn on_ready(&mut self, endpoint: &Endpoint);
+    /// Called when the Endpoint is connected and Configuration events were subscribed.
+    ///
+    /// Usually, the implementation publishes a configuration request event on the EDA Bus.
     fn on_waiting_for_configuration(&mut self, endpoint: &Endpoint);
-    /// A configuration message arrived.
-    /// Return `true` if the configuration is complete.
+    /// Called when a subscribed configuration event is received.
+    ///
+    /// The implementation returns `Ok(true)` only if it is fully configured and ready to
+    /// consume business events.
     fn on_configuration(
         &mut self,
         endpoint: &Endpoint,
         message: Box<Delivery>,
     ) -> Result<bool, Error>;
+    /// Called when a subscribed event is received.
+    ///
+    /// If an [`Error`] is returned, the message is acknowledged accordingly.
     fn on_event(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
+    /// Called when a subscribed command is received.
+    ///
+    /// If an [`Error`] is returned, the message is acknowledged accordingly.
     fn on_command(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
-    fn on_result(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
+        /// Called when a subscribed result is received.
+    ///
+    /// If an [`Error`] is returned, the message is acknowledged accordingly.
+fn on_result(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
+    /// Called when a message sent with the `mandatory` flag true is unroutable.
     fn on_message_returned(&mut self, endpoint: &Endpoint, routing_key: String);
+    /// This method is called every second with the `time` elapsed seconds since the endpoint was started.
     fn on_clock_ticked(&mut self, endpoint: &Endpoint, time: u64);
 }
 
+
+/// Run the service forever, consuming the [`Message`] events and triggering the callbacks.
 pub async fn run_service<T: Service>(
     mut service: T,
     endpoint: &Endpoint,
@@ -65,6 +93,8 @@ pub async fn run_service<T: Service>(
     }
 }
 
+/// Execute the synchronous `callback` to process the `delivery` in a transaction like manner.
+/// The `delivery` as ACKed, NACKed (and requeued) or REJECTed depending on the `Error` returned.
 pub fn safely_apply_sync<F>(
     endpoint: &Endpoint,
     delivery: Box<Delivery>,
@@ -110,6 +140,8 @@ where
     }
 }
 
+/// Execute the async `callback` to process the `delivery` in a transaction like manner.
+/// The `delivery` as ACKed, NACKed (and requeued) or REJECTed depending on the `Error` returned.
 pub async fn safely_apply<'a, F, Fut>(
     endpoint: &'a Endpoint,
     delivery: Box<Delivery>,

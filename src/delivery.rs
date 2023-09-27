@@ -1,13 +1,17 @@
+//! `Delivery` represents messages received from the EDA Bus.
+
 use amqprs::BasicProperties;
 use amqprs::Deliver;
 use serde::Deserialize;
 
+/// A message received from the EDA bus
 pub struct Delivery {
     deliver: Deliver,
     properties: BasicProperties,
-    pub payload: Vec<u8>,
+    payload: Vec<u8>,
 }
 
+/// Error type for `Delivery` methods.
 pub enum Error {
     Deserialization(String),
 }
@@ -19,6 +23,8 @@ impl<T: std::error::Error> From<T> for Error {
 }
 
 impl Delivery {
+    /// Create a new `Delivery` from lower level parts.
+    /// This method is private to the crate.
     pub fn new(deliver: Deliver, properties: BasicProperties, payload: Vec<u8>) -> Self {
         Self {
             deliver,
@@ -27,6 +33,7 @@ impl Delivery {
         }
     }
 
+    /// Return the delivery tag.
     pub fn tag(&self) -> u64 {
         self.deliver.delivery_tag()
     }
@@ -39,6 +46,7 @@ impl Delivery {
         self.properties.content_type()
     }
 
+    /// Return true if the message was already presented to this or another worker (and was nack'ed).
     pub fn redelivered(&self) -> bool {
         self.deliver.redelivered()
     }
@@ -50,6 +58,7 @@ impl Delivery {
             .and_then(|v| v.try_into().ok())
     }
 
+    /// For Results to Commands, indicates "success" or "error".
     pub fn status(&self) -> Option<&String> {
         self.properties
             .headers()
