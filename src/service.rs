@@ -2,7 +2,7 @@ use log::error;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::delivery::{Delivery, Error as DError};
-use super::endpoint::{ClientMessage as Message, Criticity, Endpoint};
+use super::endpoint::{ClientMessage as Message, Criticity, Endpoint, Error as EError};
 
 pub enum Error {
     Recoverable(String),
@@ -42,27 +42,34 @@ pub async fn run_service<T: Service>(
 ) {
     while let Some(message) = client_rx.recv().await {
         match message {
-            Message::ClockTicked(time) => service.on_clock_ticked(&endpoint, time),
+            Message::ClockTicked(time) => service.on_clock_ticked(endpoint, time),
             Message::CommandReceived(msg) => {
-                transaction_call(&endpoint, msg, |e, d| service.on_command(e, d)).await
+                safely_apply_sync(endpoint, msg, |e, d| service.on_command(e, d))
+                    .unwrap_or_else(|_| error!("Endpoint dropped!"));
             }
             Message::ConfigurationReceived(_msg) => todo!(),
             Message::EventReceived(msg) => {
-                transaction_call(&endpoint, msg, |e, d| service.on_event(e, d)).await
+                safely_apply_sync(endpoint, msg, |e, d| service.on_event(e, d))
+                    .unwrap_or_else(|_| error!("Endpoint dropped!"));
             }
             Message::MessageReturned(routing_key) => {
-                service.on_message_returned(&endpoint, routing_key)
+                service.on_message_returned(endpoint, routing_key)
             }
-            Message::Ready => service.on_ready(&endpoint),
+            Message::Ready => service.on_ready(endpoint),
             Message::ResultReceived(msg) => {
-                transaction_call(&endpoint, msg, |e, d| service.on_result(e, d)).await
+                safely_apply_sync(endpoint, msg, |e, d| service.on_result(e, d))
+                    .unwrap_or_else(|_| error!("Endpoint dropped!"));
             }
-            Message::WaitingForConfiguration => service.on_waiting_for_configuration(&endpoint),
+            Message::WaitingForConfiguration => service.on_waiting_for_configuration(endpoint),
         }
     }
 }
 
-pub async fn transaction_call<F>(endpoint: &Endpoint, delivery: Box<Delivery>, mut callback: F)
+pub fn safely_apply_sync<F>(
+    endpoint: &Endpoint,
+    delivery: Box<Delivery>,
+    mut callback: F,
+) -> Result<(), EError>
 where
     F: FnMut(&Endpoint, Box<Delivery>) -> Result<(), Error>,
 {
@@ -71,48 +78,80 @@ where
     let conversation_id = delivery.conversation_id().unwrap().clone();
     let redelivered = delivery.redelivered();
     match callback(endpoint, delivery) {
-        Ok(_) => endpoint
-            .ack_delivery(delivery_tag)
-            .unwrap_or_else(|_| error!("Endpoint dropped!")),
+        Ok(_) => endpoint.ack_delivery(delivery_tag),
         Err(Error::Recoverable(msg)) => {
-            endpoint
-                .log(
-                    Criticity::Critical,
-                    &format!("Error processing {message_type}"),
-                    &msg,
-                    &conversation_id,
-                )
-                .ok();
+            endpoint.log(
+                Criticity::Critical,
+                &format!("Error processing {message_type}"),
+                &msg,
+                &conversation_id,
+            )?;
             if redelivered {
-                endpoint
-                    .log(
-                        Criticity::Emergency,
-                        &format!("Too many retries for {message_type}; giving up!"),
-                        "rejecting message",
-                        &conversation_id,
-                    )
-                    .ok();
-                endpoint
-                    .reject_delivery(delivery_tag)
-                    .unwrap_or_else(|_| error!("Endpoint dropped!"));
+                endpoint.log(
+                    Criticity::Emergency,
+                    &format!("Too many retries for {message_type}; giving up!"),
+                    "rejecting message",
+                    &conversation_id,
+                )?;
+                endpoint.reject_delivery(delivery_tag)
             } else {
-                endpoint
-                    .nack_delivery(delivery_tag)
-                    .unwrap_or_else(|_| error!("Endpoint dropped!"));
+                endpoint.nack_delivery(delivery_tag)
             }
         }
         Err(Error::Critical(msg)) => {
-            endpoint
-                .log(
+            endpoint.log(
+                Criticity::Emergency,
+                &format!("Unrecoverable error processing {message_type}; giving up!"),
+                &msg,
+                &conversation_id,
+            )?;
+            endpoint.reject_delivery(delivery_tag)
+        }
+    }
+}
+
+pub async fn safely_apply<'a, F, Fut>(
+    endpoint: &'a Endpoint,
+    delivery: Box<Delivery>,
+    mut callback: F,
+) -> Result<(), EError>
+where
+    F: FnMut(&'a Endpoint, Box<Delivery>) -> Fut,
+    Fut: std::future::Future<Output = Result<(), Error>>,
+{
+    let delivery_tag = delivery.tag();
+    let message_type = delivery.routing_key().clone();
+    let conversation_id = delivery.conversation_id().unwrap().clone();
+    let redelivered = delivery.redelivered();
+    match callback(endpoint, delivery).await {
+        Ok(_) => endpoint.ack_delivery(delivery_tag),
+        Err(Error::Recoverable(msg)) => {
+            endpoint.log(
+                Criticity::Critical,
+                &format!("Error processing {message_type}"),
+                &msg,
+                &conversation_id,
+            )?;
+            if redelivered {
+                endpoint.log(
                     Criticity::Emergency,
-                    &format!("Unrecoverable error processing {message_type}; giving up!"),
-                    &msg,
+                    &format!("Too many retries for {message_type}; giving up!"),
+                    "rejecting message",
                     &conversation_id,
-                )
-                .ok();
-            endpoint
-                .reject_delivery(delivery_tag)
-                .unwrap_or_else(|_| error!("Endpoint dropped!"));
+                )?;
+                endpoint.reject_delivery(delivery_tag)
+            } else {
+                endpoint.nack_delivery(delivery_tag)
+            }
+        }
+        Err(Error::Critical(msg)) => {
+            endpoint.log(
+                Criticity::Emergency,
+                &format!("Unrecoverable error processing {message_type}; giving up!"),
+                &msg,
+                &conversation_id,
+            )?;
+            endpoint.reject_delivery(delivery_tag)
         }
     }
 }

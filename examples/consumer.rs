@@ -1,7 +1,8 @@
 use std::env;
 
-use eventail::delivery::Error as DError;
+use eventail::delivery::Delivery;
 use eventail::endpoint::{ClientMessage as Message, Config, Criticity, Endpoint};
+use eventail::service::{safely_apply, Error as TError};
 use serde::Deserialize;
 use tokio::signal;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -14,34 +15,32 @@ struct Ping<'a> {
     comment: &'a str,
 }
 
+async fn handle_event(endpoint: &Endpoint, delivery: Box<Delivery>) -> Result<(), TError> {
+    if delivery.routing_key() != "Ping" {
+        return Err(TError::Recoverable(format!(
+            "unsupported message {}",
+            delivery.routing_key()
+        )));
+    }
+    let ping: Ping = delivery.deserialize_payload()?;
+    endpoint
+        .log(
+            Criticity::Info,
+            "Got event",
+            &format!("Received Ping {:?}", ping),
+            "",
+        )
+        .ok();
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    Ok(())
+}
+
 async fn consume(mut client_rx: UnboundedReceiver<Message>, endpoint: &Endpoint) {
     while let Some(msg) = client_rx.recv().await {
         match msg {
             Message::Ready => println!("Ready"),
             Message::EventReceived(delivery) => {
-                if delivery.routing_key() != "Ping" {
-                    println!("unsupported message {}", delivery.routing_key());
-                    endpoint.nack_delivery(delivery.tag()).ok();
-                } else {
-                    let conversation_id = delivery.conversation_id().unwrap();
-                    match delivery.deserialize_payload::<Ping>() {
-                        Ok(ping) => {
-                            println!("Received Ping {:?}", ping);
-                            endpoint.ack_delivery(delivery.tag()).ok();
-                        }
-                        Err(DError::Deserialization(msg)) => {
-                            endpoint
-                                .log(
-                                    Criticity::Critical,
-                                    "Unable to deserialize payload",
-                                    &msg,
-                                    conversation_id,
-                                )
-                                .ok();
-                            endpoint.reject_delivery(delivery.tag()).ok();
-                        }
-                    }
-                }
+                safely_apply(endpoint, delivery, handle_event).await.ok();
             }
             Message::ClockTicked(t) => {
                 if t % 60 == 0 {
