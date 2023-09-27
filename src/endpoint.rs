@@ -4,10 +4,12 @@ use serde::Serialize;
 use tokio::sync::mpsc::{error, unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::{JoinError, JoinHandle};
 
+pub(crate) mod delivery;
 mod gelf;
 mod manager;
 pub(crate) mod shipment;
 
+pub use delivery::Delivery;
 pub use gelf::Criticity;
 use gelf::GelfPayload;
 use manager::{run, EndpointManager, Message};
@@ -35,7 +37,12 @@ pub type Receiver = UnboundedReceiver<ClientMessage>;
 
 pub enum ClientMessage {
     ClockTicked(u64),
+    CommandReceived(Box<Delivery>),
+    ConfigurationReceived(Box<Delivery>),
+    EventReceived(Box<Delivery>),
+    MessageReturned(String),
     Ready,
+    ResultReceived(Box<Delivery>),
     WaitingForConfiguration,
 }
 
@@ -43,6 +50,9 @@ pub struct Config {
     pub prefetch_count: u16,
     pub hosts: Vec<String>,
     pub logical_service: String,
+    pub event_subscriptions: Vec<String>,
+    pub command_subscriptions: Vec<String>,
+    pub configuration_subscriptions: Vec<String>,
 }
 
 pub struct Endpoint {
@@ -174,6 +184,26 @@ impl Endpoint {
                 &payload,
                 conversation_id,
             ))))?)
+    }
+
+    pub fn configured(&self) -> Result<(), Error> {
+        self.endpoint_tx.send(Message::Configured)?;
+        Ok(())
+    }
+
+    pub fn ack_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
+        self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
+        Ok(())
+    }
+
+    pub fn nack_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
+        self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
+        Ok(())
+    }
+
+    pub fn reject_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
+        self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
+        Ok(())
     }
 
     pub async fn shutdown(self) -> Result<(), Error> {
