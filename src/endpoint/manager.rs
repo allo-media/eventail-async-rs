@@ -14,8 +14,8 @@ use log::{debug, error, info, warn};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant};
 
-use super::delivery::Delivery;
 use super::shipment::Shipment;
+use super::Delivery;
 use super::{ClientMessage, Config};
 
 pub const EVENT_EXCHANGE: &str = "events";

@@ -1,3 +1,7 @@
+//! Minimal publisher example, without any subscriptions.
+//!
+//! The client channel receiver can be safely dropped if only publishing is needed.
+
 use std::env;
 
 use serde::Serialize;
