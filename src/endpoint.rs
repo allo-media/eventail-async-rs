@@ -30,7 +30,6 @@ async fn main() {
 ```
 */
 
-
 use log::debug;
 use serde::Serialize;
 
@@ -65,7 +64,6 @@ impl From<JoinError> for Error {
     }
 }
 
-
 /// Events sent by the endpoint and consumed by the user code.
 pub enum ClientMessage {
     ClockTicked(u64),
@@ -88,13 +86,12 @@ pub struct Config {
     pub configuration_subscriptions: Vec<String>,
 }
 
-
 /// The endpoint API.
 pub struct Endpoint {
     endpoint_tx: UnboundedSender<Message>,
     pub force_json: bool,
     manager_handle: JoinHandle<()>,
-    logical_service: String
+    logical_service: String,
 }
 
 impl Endpoint {

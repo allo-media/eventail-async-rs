@@ -1,7 +1,6 @@
 //! Callback API and helpers for implementing services.
 //!
 
-
 use log::error;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -51,16 +50,15 @@ pub trait Service {
     ///
     /// If an [`Error`] is returned, the message is acknowledged accordingly.
     fn on_command(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
-        /// Called when a subscribed result is received.
+    /// Called when a subscribed result is received.
     ///
     /// If an [`Error`] is returned, the message is acknowledged accordingly.
-fn on_result(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
+    fn on_result(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error>;
     /// Called when a message sent with the `mandatory` flag true is unroutable.
     fn on_message_returned(&mut self, endpoint: &Endpoint, routing_key: String);
     /// This method is called every second with the `time` elapsed seconds since the endpoint was started.
     fn on_clock_ticked(&mut self, endpoint: &Endpoint, time: u64);
 }
-
 
 /// Run the service forever, consuming the [`Message`] events and triggering the callbacks.
 pub async fn run_service<T: Service>(
