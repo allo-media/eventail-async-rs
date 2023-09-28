@@ -1,3 +1,13 @@
+//! This example start a business service and a data processing ("command") service.
+//!
+//! The business service makes asynchronous API calls to the data processing service (a trivial lower case provider)
+//! each time it receives a `IdentifierChosen` event. When it receives the results, it publishes a `IdentifierNormalized`
+//! event.
+//!
+//! To trigger the behavior, use the Eventail command line tool `publish_event.py` to publish a `IdentifierChosen` event.
+//! A sample payload is provided : `IdentifierChosen.json`.
+
+
 use std::env;
 
 use eventail::endpoint::{Config, Endpoint};

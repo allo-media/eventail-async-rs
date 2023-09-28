@@ -25,7 +25,7 @@ impl<T: std::error::Error> From<T> for Error {
 impl Delivery {
     /// Create a new `Delivery` from lower level parts.
     /// This method is private to the crate.
-    pub fn new(deliver: Deliver, properties: BasicProperties, payload: Vec<u8>) -> Self {
+    pub(crate) fn new(deliver: Deliver, properties: BasicProperties, payload: Vec<u8>) -> Self {
         Self {
             deliver,
             properties,

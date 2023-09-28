@@ -1,3 +1,7 @@
+//! Consumer example using the (lower level) Channel API.
+//!
+//! Use the publisher example to send events.
+
 use std::env;
 
 use eventail::delivery::Delivery;
