@@ -290,7 +290,7 @@ impl Endpoint {
         Ok(())
     }
 
-    /// Shutdown the enpoint gracefully.
+    /// Shutdown the endpoint gracefully.
     pub async fn shutdown(self) -> Result<(), Error> {
         self.endpoint_tx.send(Message::Shutdown)?;
         self.manager_handle.await?;
