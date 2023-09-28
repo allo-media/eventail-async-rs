@@ -139,7 +139,7 @@ where
 }
 
 /// Execute the async `callback` to process the `delivery` in a transaction like manner.
-/// The `delivery` as ACKed, NACKed (and requeued) or REJECTed depending on the `Error` returned.
+/// The `delivery` is ACKed, NACKed (and requeued) or REJECTed depending on the `Error` returned.
 pub async fn safely_apply<'a, F, Fut>(
     endpoint: &'a Endpoint,
     delivery: Box<Delivery>,
