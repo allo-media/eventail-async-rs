@@ -95,12 +95,12 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Create and start an new endpoint.
+    /// Create and start a new endpoint.
     ///
-    /// A background task is launched that manages the connection and the topoloy and automatically
+    /// A background task is launched that manages the connection and the topology and automatically
     /// switches over or reconnects in case of network or broker failure.
     /// Return an `Endpoint` and a channel receiver for EDA and local messages.
-    /// The background task should be cleany shutdown when not needed anymore with the `.shutdown()` method.
+    /// The background task should be cleanly shutdown when not needed anymore with the `.shutdown()` method.
     pub fn new(config: Config) -> (Self, UnboundedReceiver<ClientMessage>) {
         let (endpoint_tx, endpoint_rx) = unbounded_channel();
         let (client_tx, client_rx) = unbounded_channel();
