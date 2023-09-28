@@ -92,7 +92,7 @@ pub async fn run_service<T: Service>(
 }
 
 /// Execute the synchronous `callback` to process the `delivery` in a transaction like manner.
-/// The `delivery` as ACKed, NACKed (and requeued) or REJECTed depending on the `Error` returned.
+/// The `delivery` is ACKed, NACKed (and requeued) or REJECTed depending on the `Error` returned.
 pub fn safely_apply_sync<F>(
     endpoint: &Endpoint,
     delivery: Box<Delivery>,
