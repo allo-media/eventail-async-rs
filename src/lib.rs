@@ -8,7 +8,7 @@ The Endpoint manages the connection and event publishing, including publisher co
 The Client Receiver receives the subscribed messages and local events.
 
 The User code can choose to consume events ([`endpoint::ClientMessage`]) directly from the Client Receiver,
-but then it must acknowledge (ACK or NACk) the processed messages explicitely
+but then it must acknowledge (ACK or NACK) the processed messages explicitly
 ([`Endpoint::ack_delivery`], [`Endpoint::nack_delivery`] or [`Endpoint::reject_delivery`]) and inform the endpoint
 when it is configured and ready to consume business messages ([`Endpoint::configured`]).
 
