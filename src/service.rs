@@ -9,7 +9,7 @@ use super::endpoint::{ClientMessage as Message, Criticity, Endpoint, Error as EE
 
 /// Error type for message handlers.
 /// In case of recoverable error, the error is logged and the message is requeued (only once).
-/// In case of critical errer, the error is logged and the message is rejected to the dead-letter.
+/// In case of critical error, the error is logged and the message is rejected to the dead-letter.
 pub enum Error {
     Recoverable(String),
     Critical(String),
