@@ -1,3 +1,5 @@
+//! Minimal example to create an endpoint.
+
 use std::env;
 
 use tokio::signal;

@@ -59,6 +59,7 @@ impl<'a> GelfPayload<'a> {
         full_message: &'a str,
         conversation_id: &'a str,
         logical_service: &'a str,
+        host: &'a str,
     ) -> Self {
         Self {
             version: "1.1",
@@ -69,7 +70,7 @@ impl<'a> GelfPayload<'a> {
             conversation_id,
             logical_service,
             worker_pid: std::process::id(),
-            host: "allo-media.tech", // Mandatory but never appears in Graylog, why?
+            host,
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
