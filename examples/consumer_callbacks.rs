@@ -2,7 +2,6 @@
 //!
 //! Use the publisher example to send events.
 
-
 use std::env;
 
 use eventail::endpoint::{Config, Criticity, Endpoint};

@@ -92,6 +92,7 @@ pub struct Endpoint {
     pub force_json: bool,
     manager_handle: JoinHandle<()>,
     logical_service: String,
+    host: String,
 }
 
 impl Endpoint {
@@ -113,6 +114,7 @@ impl Endpoint {
                 manager_handle,
                 force_json: false,
                 logical_service,
+                host: gethostname::gethostname().into_string().unwrap(),
             },
             client_rx,
         )
@@ -247,6 +249,7 @@ impl Endpoint {
             full_message,
             conversation_id,
             &self.logical_service,
+            &self.host,
         );
         Ok(self
             .endpoint_tx

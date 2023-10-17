@@ -7,7 +7,6 @@
 //! To trigger the behavior, use the Eventail command line tool `publish_event.py` to publish a `IdentifierChosen` event.
 //! A sample payload is provided : `IdentifierChosen.json`.
 
-
 use std::env;
 
 use eventail::endpoint::{Config, Endpoint};
