@@ -42,6 +42,7 @@ pub(crate) mod shipment;
 
 pub use super::Delivery;
 pub use gelf::Criticity;
+pub use gelf::ExtraFields;
 use gelf::GelfPayload;
 use manager::{run, EndpointManager, Message};
 use shipment::Shipment;
@@ -234,13 +235,14 @@ impl Endpoint {
             ))))?)
     }
 
-    /// Log on the EDA log bus.
-    pub fn log(
+    /// Log on the EDA log bus with custom fields.
+    pub fn log_with_extra_fields(
         &self,
         criticity: Criticity,
         short_message: &str,
         full_message: &str,
         conversation_id: &str,
+        extra_fields: ExtraFields,
     ) -> Result<(), Error> {
         debug!("{}: {short_message}\n{full_message}", criticity.label());
         let payload = GelfPayload::new(
@@ -250,6 +252,7 @@ impl Endpoint {
             conversation_id,
             &self.logical_service,
             &self.host,
+            extra_fields,
         );
         Ok(self
             .endpoint_tx
@@ -258,6 +261,23 @@ impl Endpoint {
                 &payload,
                 conversation_id,
             ))))?)
+    }
+
+    /// Log on the EDA log bus
+    pub fn log(
+        &self,
+        criticity: Criticity,
+        short_message: &str,
+        full_message: &str,
+        conversation_id: &str,
+    ) -> Result<(), Error> {
+        self.log_with_extra_fields(
+            criticity,
+            short_message,
+            full_message,
+            conversation_id,
+            ExtraFields::new(),
+        )
     }
 
     /// Tell the endpoint that the client is configured and ready to accept events and commands.

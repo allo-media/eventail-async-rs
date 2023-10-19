@@ -6,7 +6,7 @@ use std::env;
 
 use serde::Serialize;
 
-use eventail::endpoint::{Config, Criticity, Endpoint};
+use eventail::endpoint::{Config, Criticity, Endpoint, ExtraFields};
 
 #[derive(Serialize)]
 struct Ping<'a> {
@@ -37,6 +37,22 @@ async fn main() {
             "test publisher",
             "this is just some logs",
             "noparticularcivd",
+        )
+        .unwrap();
+    let mut custom_fields = ExtraFields::new();
+    custom_fields.insert("mycustom_field1".to_owned(), 1235.into());
+    custom_fields.insert("mycustom_field2".to_owned(), "some text".into());
+    custom_fields.insert(
+        "logical_service".to_owned(),
+        "overwrite the logical_service".into(),
+    );
+    endpoint
+        .log_with_extra_fields(
+            Criticity::Info,
+            "test log_with_extra_fields",
+            "this message should have some custom fields attached.",
+            "cvid1",
+            custom_fields,
         )
         .unwrap();
     for i in 0..100 {
