@@ -42,6 +42,10 @@ async fn main() {
     let mut custom_fields = ExtraFields::new();
     custom_fields.insert("mycustom_field1".to_owned(), 1235.into());
     custom_fields.insert("mycustom_field2".to_owned(), "some text".into());
+    custom_fields.insert(
+        "logical_service".to_owned(),
+        "overwrite the logical_service".into(),
+    );
     endpoint
         .log_with_extra_fields(
             Criticity::Info,
