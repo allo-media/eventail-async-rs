@@ -106,7 +106,7 @@ where
     let conversation_id = delivery.conversation_id().unwrap().clone();
     let redelivered = delivery.redelivered();
     match callback(endpoint, delivery) {
-        Ok(_) => endpoint.ack_delivery(delivery_tag),
+        Ok(_) => endpoint.delivery_processed(delivery_tag),
         Err(Error::Recoverable(msg)) => {
             endpoint.log(
                 Criticity::Critical,
@@ -154,7 +154,7 @@ where
     let conversation_id = delivery.conversation_id().unwrap().clone();
     let redelivered = delivery.redelivered();
     match callback(endpoint, delivery).await {
-        Ok(_) => endpoint.ack_delivery(delivery_tag),
+        Ok(_) => endpoint.delivery_processed(delivery_tag),
         Err(Error::Recoverable(msg)) => {
             endpoint.log(
                 Criticity::Critical,
