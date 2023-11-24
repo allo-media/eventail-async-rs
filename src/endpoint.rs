@@ -288,11 +288,22 @@ impl Endpoint {
         Ok(())
     }
 
-    /// Tell the broker that the message was successfully processed and can be safely removed from the queue.
+    /// Tell the broker to immediately remove the message from the queue.
     ///
-    /// You don't need to call this method explicitly if you use the [`Callback API`](crate::service).
+    /// Use this method only if there is no pending publishes triggered by this message.
+    /// If unsure, use [`Endpoint::delivery_processed()`] instead.
     pub fn ack_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
         self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
+        Ok(())
+    }
+
+    /// Tell the endpoint that the message was successfully processed and can be safely removed from the queue
+    /// when all current publishing is actually done.
+    ///
+    /// You don't need to call this method explicitly if you use the [`Callback API`](crate::service).
+    pub fn delivery_processed(&self, delivery_tag: u64) -> Result<(), Error> {
+        self.endpoint_tx
+            .send(Message::DeliveryProcessed(delivery_tag))?;
         Ok(())
     }
 

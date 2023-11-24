@@ -36,13 +36,14 @@ pub enum Message {
     ConnectionClose,
     ConnectionUnblocked,
     ConsumerCancel(String),
+    DeliveryProcessed(u64),
     EventReceived(Box<Delivery>),
     NackDelivery(u64),
-    PublishAck(amqprs::Ack),
+    PublishAcked(amqprs::Ack),
     PublishLog(Box<Shipment>),
     PublishMain(Box<Shipment>),
-    PublishNack(amqprs::Nack),
-    PublishReturn(String),
+    PublishNacked(amqprs::Nack),
+    PublishReturned(String),
     RejectDelivery(u64),
     Shutdown,
 }
@@ -58,6 +59,8 @@ pub struct EndpointManager {
     command_consumer_tag: Option<String>,
     next_message_tag: u64,
     pending_publishes: BTreeMap<u64, Shipment>,
+    /// (delivery tag, last_published_tag when processed)
+    pending_consumer_acks: Vec<(u64, u64)>,
 }
 
 impl EndpointManager {
@@ -77,6 +80,7 @@ impl EndpointManager {
             command_consumer_tag: None,
             next_message_tag: 1,
             pending_publishes: BTreeMap::new(),
+            pending_consumer_acks: Vec::new(),
         }
     }
 
@@ -206,7 +210,7 @@ impl EndpointManager {
             self.main_channel.replace(main_channel);
             self.start_consuming(config).await?;
         }
-
+        self.pending_consumer_acks.clear();
         Ok(())
     }
 
@@ -291,31 +295,67 @@ impl EndpointManager {
         }
     }
 
-    fn publish_ack(&mut self, delivery_tag: u64, multiple: bool) {
-        debug!("publish confirm for {delivery_tag} (multiple {multiple})");
+    async fn publish_acked(&mut self, publish_tag: u64, multiple: bool) {
+        debug!("publish confirm for {publish_tag} (multiple {multiple})");
         if multiple {
-            let kept = self.pending_publishes.split_off(&(delivery_tag + 1));
+            let kept = self.pending_publishes.split_off(&(publish_tag + 1));
             self.pending_publishes = kept;
         } else {
-            self.pending_publishes.remove(&delivery_tag);
+            self.pending_publishes.remove(&publish_tag);
+        }
+        let limit = if let Some((lower_bound, _)) = self.pending_publishes.first_key_value() {
+            self.pending_consumer_acks
+                .iter()
+                .position(|(_, bound)| bound >= lower_bound)
+                .unwrap_or(self.pending_consumer_acks.len())
+        } else {
+            self.pending_consumer_acks.len()
+        };
+        let kept = self.pending_consumer_acks.split_off(limit);
+        let free = std::mem::replace(&mut self.pending_consumer_acks, kept);
+
+        for (tag, _) in free {
+            self.ack_delivery(tag).await
         }
         debug!(
             "{} message(s) pending confirmation",
             self.pending_publishes.len()
         );
+        debug!("{} pending consumer ACKs", self.pending_consumer_acks.len());
     }
 
-    async fn publish_nack(&mut self, delivery_tag: u64, multiple: bool) {
-        debug!("re-publish rejected or old pending messages up to {delivery_tag} (multiple {multiple})");
-        if multiple {
-            let kept = self.pending_publishes.split_off(&(delivery_tag + 1));
+    async fn publish_nacked(&mut self, publish_tag: u64, multiple: bool) {
+        debug!(
+            "re-publish rejected or old pending messages up to {publish_tag} (multiple {multiple})"
+        );
+        let lower_moved = if multiple {
+            let kept = self.pending_publishes.split_off(&(publish_tag + 1));
             let removed = std::mem::replace(&mut self.pending_publishes, kept);
             debug!("{} message to resend", removed.len());
+            let first = removed
+                .first_key_value()
+                .map(|(k, _)| *k)
+                .unwrap_or(self.next_message_tag);
             for shipment in removed.into_values() {
                 self.publish_main(shipment).await
             }
-        } else if let Some(shipment) = self.pending_publishes.remove(&delivery_tag) {
-            self.publish_main(shipment).await
+            first
+        } else if let Some(shipment) = self.pending_publishes.remove(&publish_tag) {
+            self.publish_main(shipment).await;
+            publish_tag
+        } else {
+            // unknown tag.
+            return;
+        };
+        // reschedule consumer_acks that depend on a least one of those nacks publishes
+        let limit = self
+            .pending_consumer_acks
+            .iter()
+            .position(|(_, bound)| *bound >= lower_moved)
+            .unwrap_or(self.pending_consumer_acks.len());
+        let last_published_tag = self.next_message_tag - 1;
+        for (tag, _) in self.pending_consumer_acks.split_off(limit) {
+            self.pending_consumer_acks.push((tag, last_published_tag))
         }
     }
 
@@ -329,7 +369,7 @@ impl EndpointManager {
             }
         });
         if let Some(seqno) = first_fresh_seqno {
-            self.publish_nack(seqno, true).await
+            self.publish_nacked(seqno, true).await
         }
     }
 
@@ -371,6 +411,7 @@ impl EndpointManager {
         }
     }
 
+    /// Immediately ACK delivery
     async fn ack_delivery(&self, delivery_tag: u64) {
         if let Some(ref channel) = self.main_channel {
             channel
@@ -380,6 +421,16 @@ impl EndpointManager {
                 })
                 .await
                 .unwrap_or_else(|e| error!("unable to ack messages: {e}"))
+        }
+    }
+
+    /// Schedule delivery for ACK when all previous publishes are gone
+    async fn delivery_processed(&mut self, delivery_tag: u64) {
+        if self.pending_publishes.is_empty() {
+            self.ack_delivery(delivery_tag).await
+        } else {
+            self.pending_consumer_acks
+                .push((delivery_tag, self.next_message_tag - 1))
         }
     }
 
@@ -433,7 +484,7 @@ impl EndpointManager {
                     if t % 4 == 0 && self.connection.is_none() {
                         self.setup(&config).await;
                         if self.connection.is_some() && !self.pending_publishes.is_empty() {
-                            self.publish_nack(
+                            self.publish_nacked(
                                 *self.pending_publishes.last_key_value().unwrap().0,
                                 true,
                             )
@@ -461,18 +512,23 @@ impl EndpointManager {
                     error!("Consumer cancelled! Disconnecting…");
                     self.cleanup().await
                 }
+                Message::DeliveryProcessed(delivery_tag) => {
+                    self.delivery_processed(delivery_tag).await
+                }
                 Message::EventReceived(delivery) => self.event_received(delivery).await,
                 Message::NackDelivery(delivery_tag) => {
                     self.reject_delivery(delivery_tag, true).await
                 }
-                Message::PublishAck(ack) => self.publish_ack(ack.delivery_tag(), ack.mutiple()),
+                Message::PublishAcked(ack) => {
+                    self.publish_acked(ack.delivery_tag(), ack.mutiple()).await
+                }
                 Message::PublishLog(shipment) => self.publish_log(*shipment).await,
                 Message::PublishMain(shipment) => self.publish_main(*shipment).await,
-                Message::PublishNack(nack) => {
-                    self.publish_nack(nack.delivery_tag(), nack.multiple())
+                Message::PublishNacked(nack) => {
+                    self.publish_nacked(nack.delivery_tag(), nack.multiple())
                         .await
                 }
-                Message::PublishReturn(routing_key) => self
+                Message::PublishReturned(routing_key) => self
                     .client_tx
                     .send(ClientMessage::MessageReturned(routing_key))
                     .unwrap_or_else(|_| warn!("Client dropped!")),
@@ -572,10 +628,10 @@ impl ChannelCallback for ChannelCallbackProxy {
         Ok(true)
     }
     async fn publish_ack(&mut self, _channel: &Channel, ack: amqprs::Ack) {
-        self.endpoint_tx.send(Message::PublishAck(ack)).ok();
+        self.endpoint_tx.send(Message::PublishAcked(ack)).ok();
     }
     async fn publish_nack(&mut self, _channel: &Channel, nack: amqprs::Nack) {
-        self.endpoint_tx.send(Message::PublishNack(nack)).ok();
+        self.endpoint_tx.send(Message::PublishNacked(nack)).ok();
     }
     async fn publish_return(
         &mut self,
@@ -585,7 +641,7 @@ impl ChannelCallback for ChannelCallbackProxy {
         _content: Vec<u8>,
     ) {
         self.endpoint_tx
-            .send(Message::PublishReturn(ret.routing_key().to_owned()))
+            .send(Message::PublishReturned(ret.routing_key().to_owned()))
             .ok();
     }
 }
