@@ -66,6 +66,7 @@ impl From<JoinError> for Error {
 }
 
 /// Events sent by the endpoint and consumed by the user code.
+#[derive(Debug)]
 pub enum ClientMessage {
     ClockTicked(u64),
     CommandReceived(Box<Delivery>),

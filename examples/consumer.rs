@@ -54,7 +54,7 @@ async fn consume(mut client_rx: UnboundedReceiver<Message>, endpoint: &Endpoint)
                 }
             }
             _ => {
-                println!("Ignoring unsupported message");
+                println!("Ignoring unsupported message: {:?}", msg);
             }
         }
     }

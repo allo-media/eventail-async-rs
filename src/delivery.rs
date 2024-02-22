@@ -5,6 +5,7 @@ use amqprs::Deliver;
 use serde::Deserialize;
 
 /// A message received from the EDA bus
+#[derive(Debug)]
 pub struct Delivery {
     deliver: Deliver,
     properties: BasicProperties,
