@@ -83,7 +83,7 @@ impl Delivery {
         if let Some("application/json") = self.properties.content_type().map(|s| s.as_str()) {
             Ok(serde_json::from_slice(&self.payload)?)
         } else {
-            Ok(serde_cbor::from_slice(&self.payload)?)
+            Ok(cbor4ii::serde::from_slice(&self.payload)?)
         }
     }
 }
