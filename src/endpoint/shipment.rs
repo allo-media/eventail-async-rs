@@ -27,7 +27,7 @@ impl Shipment {
         let payload = if json {
             serde_json::to_vec(message).unwrap()
         } else {
-            serde_cbor::to_vec(message).unwrap()
+            cbor4ii::serde::to_vec(Vec::new(), message).unwrap()
         };
         let content_type = if json {
             "application/json"

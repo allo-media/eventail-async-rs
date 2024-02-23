@@ -5,6 +5,7 @@ use amqprs::Deliver;
 use serde::Deserialize;
 
 /// A message received from the EDA bus
+#[derive(Debug)]
 pub struct Delivery {
     deliver: Deliver,
     properties: BasicProperties,
@@ -82,7 +83,7 @@ impl Delivery {
         if let Some("application/json") = self.properties.content_type().map(|s| s.as_str()) {
             Ok(serde_json::from_slice(&self.payload)?)
         } else {
-            Ok(serde_cbor::from_slice(&self.payload)?)
+            Ok(cbor4ii::serde::from_slice(&self.payload)?)
         }
     }
 }
