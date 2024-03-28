@@ -23,7 +23,11 @@ struct MyService;
 impl Service for MyService {
     fn on_ready(&mut self, _endpoint: &Endpoint) {}
 
-    fn on_waiting_for_configuration(&mut self, _endpoint: &Endpoint) {}
+    fn on_waiting_for_configuration(&mut self, endpoint: &Endpoint) {
+        endpoint
+            .publish_configuration("PongConfRequested", &(), "")
+            .ok();
+    }
 
     fn on_configuration(
         &mut self,
@@ -78,7 +82,7 @@ async fn main() {
         hosts,
         event_subscriptions: vec!["Ping".to_owned()],
         command_subscriptions: vec![],
-        configuration_subscriptions: vec![],
+        configuration_subscriptions: vec!["PongSettings".to_owned()],
     };
     let (endpoint, client_rx) = Endpoint::new(config);
     endpoint

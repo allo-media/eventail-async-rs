@@ -73,7 +73,12 @@ pub async fn run_service<T: Service>(
                 safely_apply_sync(endpoint, msg, |e, d| service.on_command(e, d))
                     .unwrap_or_else(|_| error!("Endpoint dropped!"));
             }
-            Message::ConfigurationReceived(_msg) => todo!(),
+            Message::ConfigurationReceived(msg) => {
+                safely_manage_configuration_sync(endpoint, msg, |e, d| {
+                    service.on_configuration(e, d)
+                })
+                .unwrap_or_else(|_| error!("Endpoint dropped!"));
+            }
             Message::EventReceived(msg) => {
                 safely_apply_sync(endpoint, msg, |e, d| service.on_event(e, d))
                     .unwrap_or_else(|_| error!("Endpoint dropped!"));
@@ -130,6 +135,40 @@ where
             endpoint.log(
                 Criticity::Emergency,
                 &format!("Unrecoverable error processing {message_type}; giving up!"),
+                &msg,
+                &conversation_id,
+            )?;
+            endpoint.reject_delivery(delivery_tag)
+        }
+    }
+}
+
+pub fn safely_manage_configuration_sync<F>(
+    endpoint: &Endpoint,
+    delivery: Box<Delivery>,
+    mut callback: F,
+) -> Result<(), EError>
+where
+    F: FnMut(&Endpoint, Box<Delivery>) -> Result<bool, Error>,
+{
+    let delivery_tag = delivery.tag();
+    let message_type = delivery.routing_key().clone();
+    let conversation_id = delivery
+        .conversation_id()
+        .cloned()
+        .unwrap_or_else(|| "".to_string());
+    match callback(endpoint, delivery) {
+        Ok(configured) => {
+            endpoint.ack_delivery(delivery_tag)?;
+            if configured {
+                endpoint.configured()?;
+            }
+            Ok(())
+        }
+        Err(Error::Critical(msg)) | Err(Error::Recoverable(msg)) => {
+            endpoint.log(
+                Criticity::Emergency,
+                &format!("Error processing configuration {message_type}; giving up!"),
                 &msg,
                 &conversation_id,
             )?;
