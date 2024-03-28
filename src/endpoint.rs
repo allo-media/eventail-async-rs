@@ -147,6 +147,27 @@ impl Endpoint {
             ))))?)
     }
 
+    /// Send a new Configuration or Configuration Request on the EDA bus.
+    ///
+    /// * `event` is the name (class name) of the message;
+    /// * `message` is the message payload;
+    /// * `conversation_id` is the mandatory conversation ID;
+    pub fn publish_configuration(
+        &self,
+        event: &str,
+        message: &impl Serialize,
+        conversation_id: &str,
+    ) -> Result<(), Error> {
+        Ok(self
+            .endpoint_tx
+            .send(Message::PublishMain(Box::new(Shipment::new_configuration(
+                event,
+                message,
+                conversation_id,
+                self.force_json,
+            ))))?)
+    }
+
     /// Send a new Command on the EDA bus.
     ///
     /// * `command` is the name (class name) of the command;
