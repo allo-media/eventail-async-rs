@@ -172,6 +172,16 @@ impl EndpointManager {
             .await?;
         debug!("log channel and exchange declared");
 
+        {
+            let conn = connection.clone();
+            let api = self.endpoint_tx.clone();
+            tokio::spawn(async move {
+                if conn.listen_network_io_failure().await {
+                    error!("Disconnected because of IO failure");
+                    api.send(Message::ConnectionClose).ok();
+                }
+            });
+        }
         self.connection.replace(connection);
         self.log_channel.replace(log_channel);
         self.next_message_tag = 1;
