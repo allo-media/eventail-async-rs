@@ -130,33 +130,6 @@ impl EndpointManager {
             .await?;
         debug!("Exchanges declared");
 
-        let (event_queue, _, _) = main_channel
-            .queue_declare(QueueDeclareArguments::durable_client_named(&format!(
-                "{}.events",
-                config.logical_service
-            )))
-            .await?
-            .unwrap();
-        let (cmd_queue, _, _) = main_channel
-            .queue_declare(QueueDeclareArguments::durable_client_named(&format!(
-                "{}.commands",
-                config.logical_service
-            )))
-            .await?
-            .unwrap();
-
-        for event in config.event_subscriptions.iter() {
-            main_channel
-                .queue_bind(QueueBindArguments::new(&event_queue, EVENT_EXCHANGE, event))
-                .await?;
-        }
-        for cmd in config.command_subscriptions.iter() {
-            main_channel
-                .queue_bind(QueueBindArguments::new(&cmd_queue, COMMAND_EXCHANGE, cmd))
-                .await?;
-        }
-        debug!("business queues and bindings declared");
-
         // main_channel.flow(true).await?;
 
         let log_channel = connection.open_channel(None).await?;
@@ -227,28 +200,58 @@ impl EndpointManager {
     async fn start_consuming(&mut self, config: &Config) -> Result<(), Error> {
         if let Some(ref main_channel) = self.main_channel {
             debug!("setup business consumers");
-            self.event_consumer_tag.replace(
-                main_channel
-                    .basic_consume(
-                        Consumer::new(self.endpoint_tx.clone()),
-                        BasicConsumeArguments::new(
-                            &format!("{}.events", config.logical_service),
-                            "",
-                        ),
-                    )
-                    .await?,
-            );
-            self.command_consumer_tag.replace(
-                main_channel
-                    .basic_consume(
-                        Consumer::new(self.endpoint_tx.clone()),
-                        BasicConsumeArguments::new(
-                            &format!("{}.commands", config.logical_service),
-                            "",
-                        ),
-                    )
-                    .await?,
-            );
+            if !config.event_subscriptions.is_empty() && self.event_consumer_tag.is_none() {
+                let (event_queue, _, _) = main_channel
+                    .queue_declare(QueueDeclareArguments::durable_client_named(&format!(
+                        "{}.events",
+                        config.logical_service
+                    )))
+                    .await?
+                    .unwrap();
+                for event in config.event_subscriptions.iter() {
+                    main_channel
+                        .queue_bind(QueueBindArguments::new(&event_queue, EVENT_EXCHANGE, event))
+                        .await?;
+                }
+                self.event_consumer_tag.replace(
+                    main_channel
+                        .basic_consume(
+                            Consumer::new(self.endpoint_tx.clone()),
+                            BasicConsumeArguments::new(
+                                &format!("{}.events", config.logical_service),
+                                "",
+                            ),
+                        )
+                        .await?,
+                );
+                debug!("Event queue declared, bound and consuming");
+            }
+            if !config.command_subscriptions.is_empty() && self.command_consumer_tag.is_none() {
+                let (cmd_queue, _, _) = main_channel
+                    .queue_declare(QueueDeclareArguments::durable_client_named(&format!(
+                        "{}.commands",
+                        config.logical_service
+                    )))
+                    .await?
+                    .unwrap();
+                for cmd in config.command_subscriptions.iter() {
+                    main_channel
+                        .queue_bind(QueueBindArguments::new(&cmd_queue, COMMAND_EXCHANGE, cmd))
+                        .await?;
+                }
+                self.command_consumer_tag.replace(
+                    main_channel
+                        .basic_consume(
+                            Consumer::new(self.endpoint_tx.clone()),
+                            BasicConsumeArguments::new(
+                                &format!("{}.commands", config.logical_service),
+                                "",
+                            ),
+                        )
+                        .await?,
+                );
+                debug!("Command queue declared, bound and consuming");
+            }
         }
         self.client_tx
             .send(ClientMessage::Ready)
@@ -291,6 +294,8 @@ impl EndpointManager {
         if let Some(c) = self.connection.take() {
             c.close().await.ok();
         };
+        self.event_consumer_tag.take();
+        self.command_consumer_tag.take();
     }
 
     async fn publish_main(&mut self, mut shipment: Shipment) {
