@@ -1,0 +1,7 @@
+[[redirects]]
+  from = "/index.html"
+  to = "/eventail/index.html"
+
+[[redirects]]
+  from = "/"
+  to = "/eventail/"
