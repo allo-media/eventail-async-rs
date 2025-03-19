@@ -12,10 +12,10 @@ use amqprs::error::Error;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration, Instant};
+use tokio::time::{Duration, Instant, interval};
 
-use super::shipment::Shipment;
 use super::Delivery;
+use super::shipment::Shipment;
 use super::{ClientMessage, Config};
 
 pub const EVENT_EXCHANGE: &str = "events";
@@ -398,13 +398,16 @@ impl EndpointManager {
 
     async fn setup(&mut self, config: &Config) {
         for host in config.hosts.iter() {
-            if let Err(err) = self.try_setup(host, config).await {
-                warn!(
-                    "Unable to connect to {}: {err}",
-                    host.split('@').last().unwrap()
-                );
-            } else {
-                break;
+            match self.try_setup(host, config).await {
+                Err(err) => {
+                    warn!(
+                        "Unable to connect to {}: {err}",
+                        host.split('@').last().unwrap()
+                    );
+                }
+                _ => {
+                    break;
+                }
             }
         }
         if self.connection.is_none() {

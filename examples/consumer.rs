@@ -6,7 +6,7 @@ use std::env;
 
 use eventail::delivery::Delivery;
 use eventail::endpoint::{ClientMessage as Message, Config, Criticity, Endpoint};
-use eventail::service::{safely_apply, Error as TError};
+use eventail::service::{Error as TError, safely_apply};
 use serde::Deserialize;
 use tokio::signal;
 use tokio::sync::mpsc::UnboundedReceiver;

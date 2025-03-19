@@ -9,9 +9,9 @@
 
 use std::env;
 
-use eventail::endpoint::{Config, Endpoint};
-use eventail::service::{run_service, Error, Service};
 use eventail::Delivery;
+use eventail::endpoint::{Config, Endpoint};
+use eventail::service::{Error, Service, run_service};
 use serde::{Deserialize, Serialize};
 use tokio::signal;
 
