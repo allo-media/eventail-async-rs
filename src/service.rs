@@ -23,6 +23,12 @@ impl From<DError> for Error {
     }
 }
 
+impl From<EError> for Error {
+    fn from(_value: EError) -> Self {
+        Self::Recoverable("Endpoint is down?".to_owned())
+    }
+}
+
 /// The traditional Callback API
 ///
 /// A service should be run with [`run_service`].

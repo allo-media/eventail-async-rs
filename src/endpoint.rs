@@ -33,7 +33,7 @@ async fn main() {
 use log::debug;
 use serde::Serialize;
 
-use tokio::sync::mpsc::{error, unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error, unbounded_channel};
 use tokio::task::{JoinError, JoinHandle};
 
 mod gelf;
@@ -44,7 +44,7 @@ pub use super::Delivery;
 pub use gelf::Criticity;
 pub use gelf::ExtraFields;
 use gelf::GelfPayload;
-use manager::{run, EndpointManager, Message};
+use manager::{EndpointManager, Message, run};
 use shipment::Shipment;
 
 #[derive(Debug)]
@@ -128,7 +128,7 @@ impl Endpoint {
     /// * `message` is the event payload;
     /// * `conversation_id` is the mandatory conversation ID;
     /// * if `mandatory` is true, a `ClientMessage::MessageReturned(_)` will be sent if the event is
-    /// unroutable, that is, the exchange did not find any queue to put it in.
+    ///   unroutable, that is, the exchange did not find any queue to put it in.
     pub fn publish_event(
         &self,
         event: &str,
@@ -176,7 +176,7 @@ impl Endpoint {
     /// * `reply_to`: is the routing key to send the result to;
     /// * `correlation_id`: is the mandatory correlation ID used to reconcile the result with the command;
     /// * if `mandatory` is true, a `ClientMessage::MessageReturned(_)` will be sent if the command is
-    /// unroutable, that is, the exchange did not find any queue to put it in.
+    ///   unroutable, that is, the exchange did not find any queue to put it in.
     pub fn send_command(
         &self,
         command: &str,
@@ -206,7 +206,7 @@ impl Endpoint {
     /// * `conversation_id` is the mandatory conversation ID;
     /// * `correlation_id`: is the mandatory correlation ID used to reconcile the result with the command;
     /// * if `mandatory` is true, a `ClientMessage::MessageReturned(_)` will be sent if the result is
-    /// unroutable, that is, the exchange did not find any queue to put it in.
+    ///   unroutable, that is, the exchange did not find any queue to put it in.
     pub fn return_success(
         &self,
         destination: &str,
@@ -235,7 +235,7 @@ impl Endpoint {
     /// * `conversation_id` is the mandatory conversation ID;
     /// * `correlation_id`: is the mandatory correlation ID used to reconcile the result with the command;
     /// * if `mandatory` is true, a `ClientMessage::MessageReturned(_)` will be sent if the result is
-    /// unroutable, that is, the exchange did not find any queue to put it in.
+    ///   unroutable, that is, the exchange did not find any queue to put it in.
     pub fn return_error(
         &self,
         destination: &str,
