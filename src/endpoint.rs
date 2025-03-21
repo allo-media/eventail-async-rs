@@ -342,7 +342,7 @@ impl Endpoint {
     ///
     /// You don't need to call this method explicitly if you use the [`Callback API`](crate::service).
     pub fn reject_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
-        self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
+        self.endpoint_tx.send(Message::RejectDelivery(delivery_tag))?;
         Ok(())
     }
 
