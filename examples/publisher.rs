@@ -31,7 +31,8 @@ async fn main() {
         configuration_subscriptions: vec![],
     };
     let (endpoint, _) = Endpoint::new(config);
-    endpoint
+    let handle = endpoint.new_handle();
+    handle
         .log(
             Criticity::Info,
             "test publisher",
@@ -46,7 +47,7 @@ async fn main() {
         "logical_service".to_owned(),
         "overwrite the logical_service".into(),
     );
-    endpoint
+    handle
         .log_with_extra_fields(
             Criticity::Info,
             "test log_with_extra_fields",
@@ -56,7 +57,7 @@ async fn main() {
         )
         .unwrap();
     for i in 0..100 {
-        endpoint
+        handle
             .publish_event(
                 "Ping",
                 &Ping {

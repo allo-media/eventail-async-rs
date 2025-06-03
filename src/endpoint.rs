@@ -88,22 +88,30 @@ pub struct Config {
     pub configuration_subscriptions: Vec<String>,
 }
 
-/// The endpoint API.
-pub struct Endpoint {
+/// The endpoint handle implements the EDA API
+#[derive(Clone)]
+pub struct EndpointHandle {
     endpoint_tx: UnboundedSender<Message>,
     pub force_json: bool,
-    manager_handle: JoinHandle<()>,
     logical_service: String,
     host: String,
 }
 
+/// The master endpoint API.
+pub struct Endpoint {
+    api: EndpointHandle,
+    manager_handle: JoinHandle<()>,
+}
+
 impl Endpoint {
-    /// Create and start a new endpoint.
+    /// Create and start a new master endpoint.
     ///
     /// A background task is launched that manages the connection and the topology and automatically
     /// switches over or reconnects in case of network or broker failure.
     /// Return an `Endpoint` and a channel receiver for EDA and local messages.
-    /// The background task should be cleanly shutdown when not needed anymore with the `.shutdown()` method.
+    /// The background task should be cleanly shutdown when not needed anymore with the [`Self::shutdown()`] method.
+    ///
+    /// To use the Endpoint API, the client code should request a [`EndpointHandle`] with the [`Self::new_handle()`] method.
     pub fn new(config: Config) -> (Self, UnboundedReceiver<ClientMessage>) {
         let (endpoint_tx, endpoint_rx) = unbounded_channel();
         let (client_tx, client_rx) = unbounded_channel();
@@ -112,16 +120,32 @@ impl Endpoint {
         let manager_handle = run(manager, config);
         (
             Self {
-                endpoint_tx,
                 manager_handle,
-                force_json: false,
-                logical_service,
-                host: gethostname::gethostname().into_string().unwrap(),
+                api: EndpointHandle {
+                    endpoint_tx,
+                    force_json: false,
+                    logical_service,
+                    host: gethostname::gethostname().into_string().unwrap(),
+                },
             },
             client_rx,
         )
     }
 
+    /// Create a new handle.
+    pub fn new_handle(&self) -> EndpointHandle {
+        self.api.clone()
+    }
+
+    /// Shutdown the endpoint gracefully.
+    pub async fn shutdown(self) -> Result<(), Error> {
+        self.api.endpoint_tx.send(Message::Shutdown)?;
+        self.manager_handle.await?;
+        Ok(())
+    }
+}
+
+impl EndpointHandle {
     /// Send a new Event on the EDA bus.
     ///
     /// * `event` is the name (class name) of the event;
@@ -313,7 +337,7 @@ impl Endpoint {
     /// Tell the broker to immediately remove the message from the queue.
     ///
     /// Use this method only if there is no pending publishes triggered by this message.
-    /// If unsure, use [`Endpoint::delivery_processed()`] instead.
+    /// If unsure, use [`Self::delivery_processed()`] instead.
     pub fn ack_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
         self.endpoint_tx.send(Message::AckDelivery(delivery_tag))?;
         Ok(())
@@ -342,14 +366,8 @@ impl Endpoint {
     ///
     /// You don't need to call this method explicitly if you use the [`Callback API`](crate::service).
     pub fn reject_delivery(&self, delivery_tag: u64) -> Result<(), Error> {
-        self.endpoint_tx.send(Message::RejectDelivery(delivery_tag))?;
-        Ok(())
-    }
-
-    /// Shutdown the endpoint gracefully.
-    pub async fn shutdown(self) -> Result<(), Error> {
-        self.endpoint_tx.send(Message::Shutdown)?;
-        self.manager_handle.await?;
+        self.endpoint_tx
+            .send(Message::RejectDelivery(delivery_tag))?;
         Ok(())
     }
 }

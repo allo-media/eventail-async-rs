@@ -5,7 +5,7 @@
 use std::env;
 
 use eventail::Delivery;
-use eventail::endpoint::{Config, Criticity, Endpoint};
+use eventail::endpoint::{Config, Criticity, Endpoint, EndpointHandle};
 use eventail::service::{Error, Service, run_service};
 use serde::Deserialize;
 use tokio::signal;
@@ -21,9 +21,9 @@ struct Ping<'a> {
 struct MyService;
 
 impl Service for MyService {
-    fn on_ready(&mut self, _endpoint: &Endpoint) {}
+    fn on_ready(&mut self, _endpoint: &EndpointHandle) {}
 
-    fn on_waiting_for_configuration(&mut self, endpoint: &Endpoint) {
+    fn on_waiting_for_configuration(&mut self, endpoint: &EndpointHandle) {
         endpoint
             .publish_configuration("PongConfRequested", &(), "")
             .ok();
@@ -31,13 +31,17 @@ impl Service for MyService {
 
     fn on_configuration(
         &mut self,
-        _endpoint: &Endpoint,
+        _endpoint: &EndpointHandle,
         _message: Box<Delivery>,
     ) -> Result<bool, Error> {
         Ok(true)
     }
 
-    fn on_event(&mut self, _endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error> {
+    fn on_event(
+        &mut self,
+        _endpoint: &EndpointHandle,
+        message: Box<Delivery>,
+    ) -> Result<(), Error> {
         if message.routing_key() != "Ping" {
             println!(
                 "unsupported message {}; check subscriptions.",
@@ -50,17 +54,25 @@ impl Service for MyService {
         Ok(())
     }
 
-    fn on_command(&mut self, _endpoint: &Endpoint, _message: Box<Delivery>) -> Result<(), Error> {
+    fn on_command(
+        &mut self,
+        _endpoint: &EndpointHandle,
+        _message: Box<Delivery>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
-    fn on_result(&mut self, _endpoint: &Endpoint, _message: Box<Delivery>) -> Result<(), Error> {
+    fn on_result(
+        &mut self,
+        _endpoint: &EndpointHandle,
+        _message: Box<Delivery>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
-    fn on_message_returned(&mut self, _endpoint: &Endpoint, _routing_key: String) {}
+    fn on_message_returned(&mut self, _endpoint: &EndpointHandle, _routing_key: String) {}
 
-    fn on_clock_ticked(&mut self, endpoint: &Endpoint, time: u64) {
+    fn on_clock_ticked(&mut self, endpoint: &EndpointHandle, time: u64) {
         if time % 60 == 0 {
             endpoint
                 .log(Criticity::Notice, "healthcheck", "I'm alive!", "")
@@ -85,7 +97,8 @@ async fn main() {
         configuration_subscriptions: vec!["PongSettings".to_owned()],
     };
     let (endpoint, client_rx) = Endpoint::new(config);
-    endpoint
+    let handle = endpoint.new_handle();
+    handle
         .log(
             Criticity::Info,
             "test consumer",
@@ -96,7 +109,7 @@ async fn main() {
     let service = MyService;
     tokio::select! {
         _ = signal::ctrl_c() => {println!("CTL-C: exited")},
-        _ = run_service(service, &endpoint, client_rx) => {println!("Consumer crashed");}
+        _ = run_service(service, handle, client_rx) => {println!("Consumer crashed");}
     }
     endpoint
         .shutdown()

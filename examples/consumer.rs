@@ -5,7 +5,7 @@
 use std::env;
 
 use eventail::delivery::Delivery;
-use eventail::endpoint::{ClientMessage as Message, Config, Criticity, Endpoint};
+use eventail::endpoint::{ClientMessage as Message, Config, Criticity, Endpoint, EndpointHandle};
 use eventail::service::{Error as TError, safely_apply};
 use serde::Deserialize;
 use tokio::signal;
@@ -19,7 +19,7 @@ struct Ping<'a> {
     comment: &'a str,
 }
 
-async fn handle_event(endpoint: &Endpoint, delivery: Box<Delivery>) -> Result<(), TError> {
+async fn handle_event(endpoint: &EndpointHandle, delivery: Box<Delivery>) -> Result<(), TError> {
     if delivery.routing_key() != "Ping" {
         return Err(TError::Recoverable(format!(
             "unsupported message {}",
@@ -39,12 +39,12 @@ async fn handle_event(endpoint: &Endpoint, delivery: Box<Delivery>) -> Result<()
     Ok(())
 }
 
-async fn consume(mut client_rx: UnboundedReceiver<Message>, endpoint: &Endpoint) {
+async fn consume(mut client_rx: UnboundedReceiver<Message>, endpoint: EndpointHandle) {
     while let Some(msg) = client_rx.recv().await {
         match msg {
             Message::Ready => println!("Ready"),
             Message::EventReceived(delivery) => {
-                safely_apply(endpoint, delivery, handle_event).await.ok();
+                safely_apply(&endpoint, delivery, handle_event).await.ok();
             }
             Message::ClockTicked(t) => {
                 if t % 60 == 0 {
@@ -76,7 +76,8 @@ async fn main() {
         configuration_subscriptions: vec![],
     };
     let (endpoint, client_rx) = Endpoint::new(config);
-    endpoint
+    let handle = endpoint.new_handle();
+    handle
         .log(
             Criticity::Info,
             "test consumer",
@@ -87,7 +88,7 @@ async fn main() {
 
     tokio::select! {
         _ = signal::ctrl_c() => {println!("CTL-C: exited")},
-        _ = consume(client_rx, &endpoint) => {println!("Consumer crashed");}
+        _ = consume(client_rx, handle) => {println!("Consumer crashed");}
     }
 
     endpoint
