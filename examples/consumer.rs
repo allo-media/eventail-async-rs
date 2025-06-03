@@ -65,7 +65,7 @@ async fn main() {
     env_logger::init();
     let hosts: Vec<String> = env::args().skip(1).collect();
     if hosts.is_empty() {
-        panic!("Usage: publisher broker_uri [broker_uri…]");
+        panic!("Usage: consumer broker_uri [broker_uri…]");
     }
     let config = Config {
         prefetch_count: 20,
