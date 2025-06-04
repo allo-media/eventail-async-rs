@@ -10,7 +10,7 @@
 use std::env;
 
 use eventail::Delivery;
-use eventail::endpoint::{Config, Endpoint};
+use eventail::endpoint::{Config, Endpoint, EndpointHandle};
 use eventail::service::{Error, Service, run_service};
 use serde::{Deserialize, Serialize};
 use tokio::signal;
@@ -34,23 +34,31 @@ struct LowerCaseService;
 struct IdentifierService;
 
 impl Service for LowerCaseService {
-    fn on_ready(&mut self, _endpoint: &Endpoint) {}
+    fn on_ready(&mut self, _endpoint: &EndpointHandle) {}
 
-    fn on_waiting_for_configuration(&mut self, _endpoint: &Endpoint) {}
+    fn on_waiting_for_configuration(&mut self, _endpoint: &EndpointHandle) {}
 
     fn on_configuration(
         &mut self,
-        _endpoint: &Endpoint,
+        _endpoint: &EndpointHandle,
         _message: Box<Delivery>,
     ) -> Result<bool, Error> {
         Ok(true)
     }
 
-    fn on_event(&mut self, _endpoint: &Endpoint, _message: Box<Delivery>) -> Result<(), Error> {
+    fn on_event(
+        &mut self,
+        _endpoint: &EndpointHandle,
+        _message: Box<Delivery>,
+    ) -> Result<(), Error> {
         unreachable!()
     }
 
-    fn on_command(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error> {
+    fn on_command(
+        &mut self,
+        endpoint: &EndpointHandle,
+        message: Box<Delivery>,
+    ) -> Result<(), Error> {
         let mut request: ToLowerCase = message.deserialize_payload()?;
         let processed = request.string.to_lowercase();
         request.string = &processed;
@@ -67,29 +75,33 @@ impl Service for LowerCaseService {
         Ok(())
     }
 
-    fn on_result(&mut self, _endpoint: &Endpoint, _message: Box<Delivery>) -> Result<(), Error> {
+    fn on_result(
+        &mut self,
+        _endpoint: &EndpointHandle,
+        _message: Box<Delivery>,
+    ) -> Result<(), Error> {
         unreachable!()
     }
 
-    fn on_message_returned(&mut self, _endpoint: &Endpoint, _routing_key: String) {}
+    fn on_message_returned(&mut self, _endpoint: &EndpointHandle, _routing_key: String) {}
 
-    fn on_clock_ticked(&mut self, _endpoint: &Endpoint, _time: u64) {}
+    fn on_clock_ticked(&mut self, _endpoint: &EndpointHandle, _time: u64) {}
 }
 
 impl Service for IdentifierService {
-    fn on_ready(&mut self, _endpoint: &Endpoint) {}
+    fn on_ready(&mut self, _endpoint: &EndpointHandle) {}
 
-    fn on_waiting_for_configuration(&mut self, _endpoint: &Endpoint) {}
+    fn on_waiting_for_configuration(&mut self, _endpoint: &EndpointHandle) {}
 
     fn on_configuration(
         &mut self,
-        _endpoint: &Endpoint,
+        _endpoint: &EndpointHandle,
         _message: Box<Delivery>,
     ) -> Result<bool, Error> {
         Ok(true)
     }
 
-    fn on_event(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error> {
+    fn on_event(&mut self, endpoint: &EndpointHandle, message: Box<Delivery>) -> Result<(), Error> {
         let payload: IdentifierChosen = message.deserialize_payload()?;
         let command = ToLowerCase {
             string: payload.identifier,
@@ -107,11 +119,19 @@ impl Service for IdentifierService {
         Ok(())
     }
 
-    fn on_command(&mut self, _endpoint: &Endpoint, _message: Box<Delivery>) -> Result<(), Error> {
+    fn on_command(
+        &mut self,
+        _endpoint: &EndpointHandle,
+        _message: Box<Delivery>,
+    ) -> Result<(), Error> {
         unreachable!()
     }
 
-    fn on_result(&mut self, endpoint: &Endpoint, message: Box<Delivery>) -> Result<(), Error> {
+    fn on_result(
+        &mut self,
+        endpoint: &EndpointHandle,
+        message: Box<Delivery>,
+    ) -> Result<(), Error> {
         if message.status().unwrap() == "success" {
             let result: ToLowerCase = message.deserialize_payload()?;
             let norm_id = IdentifierNormalized {
@@ -129,9 +149,9 @@ impl Service for IdentifierService {
         Ok(())
     }
 
-    fn on_message_returned(&mut self, _endpoint: &Endpoint, _routing_key: String) {}
+    fn on_message_returned(&mut self, _endpoint: &EndpointHandle, _routing_key: String) {}
 
-    fn on_clock_ticked(&mut self, _endpoint: &Endpoint, _time: u64) {}
+    fn on_clock_ticked(&mut self, _endpoint: &EndpointHandle, _time: u64) {}
 }
 
 #[tokio::main]
@@ -159,10 +179,13 @@ async fn main() {
         configuration_subscriptions: vec![],
     };
     let (is_endpoint, is_client_rx) = Endpoint::new(is_config);
+
+    let is_handle = is_endpoint.new_handle();
+    let lcs_handle = lcs_endpoint.new_handle();
     tokio::select! {
         _ = signal::ctrl_c() => {println!("CTL-C: exited")},
-        _ = run_service(LowerCaseService, &lcs_endpoint, lcs_client_rx) => {println!("Command service crashed");}
-        _ = run_service(IdentifierService, &is_endpoint, is_client_rx) => {println!("Service crashed");}
+        _ = run_service(LowerCaseService, lcs_handle, lcs_client_rx) => {println!("Command service crashed");}
+        _ = run_service(IdentifierService, is_handle, is_client_rx) => {println!("Service crashed");}
     }
     is_endpoint
         .shutdown()

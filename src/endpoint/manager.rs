@@ -328,7 +328,7 @@ impl EndpointManager {
         };
         let kept = self.pending_consumer_acks.split_off(limit);
         let free = std::mem::replace(&mut self.pending_consumer_acks, kept);
-
+        // TODO: optimize with batch ACK?
         for (tag, _) in free {
             self.ack_delivery(tag).await
         }
@@ -402,7 +402,7 @@ impl EndpointManager {
                 Err(err) => {
                     warn!(
                         "Unable to connect to {}: {err}",
-                        host.split('@').last().unwrap()
+                        host.split('@').next_back().unwrap()
                     );
                 }
                 _ => {
