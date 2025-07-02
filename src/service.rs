@@ -118,8 +118,8 @@ where
     F: FnMut(&EndpointHandle, Box<Delivery>) -> Result<(), Error>,
 {
     let delivery_tag = delivery.tag();
-    let message_type = delivery.routing_key().clone();
-    let conversation_id = delivery.conversation_id().unwrap().clone();
+    let message_type = delivery.routing_key().to_owned();
+    let conversation_id = delivery.conversation_id().unwrap().to_owned();
     let redelivered = delivery.redelivered();
     match callback(endpoint, delivery) {
         Ok(_) => endpoint.delivery_processed(delivery_tag),
@@ -163,11 +163,10 @@ where
     F: FnMut(&EndpointHandle, Box<Delivery>) -> Result<bool, Error>,
 {
     let delivery_tag = delivery.tag();
-    let message_type = delivery.routing_key().clone();
+    let message_type = delivery.routing_key().to_owned();
     let conversation_id = delivery
         .conversation_id()
-        .cloned()
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_else(|| "").to_owned();
     match callback(endpoint, delivery) {
         Ok(configured) => {
             endpoint.ack_delivery(delivery_tag)?;
@@ -200,8 +199,8 @@ where
     Fut: std::future::Future<Output = Result<(), Error>>,
 {
     let delivery_tag = delivery.tag();
-    let message_type = delivery.routing_key().clone();
-    let conversation_id = delivery.conversation_id().unwrap().clone();
+    let message_type = delivery.routing_key().to_owned();
+    let conversation_id = delivery.conversation_id().unwrap().to_owned();
     let redelivered = delivery.redelivered();
     match callback(endpoint, delivery).await {
         Ok(_) => endpoint.delivery_processed(delivery_tag),
