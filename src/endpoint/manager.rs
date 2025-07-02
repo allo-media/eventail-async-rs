@@ -612,6 +612,8 @@ impl ConnectionCallback for ConnectionCallbackProxy {
         info!("Connection unblocked");
         self.endpoint_tx.send(Message::ConnectionUnblocked).ok();
     }
+
+    async fn secret_updated(&mut self, _connection: &Connection) {}
 }
 
 struct ChannelCallbackProxy {
