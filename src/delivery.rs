@@ -45,7 +45,7 @@ impl Delivery {
 
     pub fn content_type(&self) -> Option<&str> {
         self.properties.content_type().map(|s| s.as_str())
-        }
+    }
 
     /// Return true if the message was already presented to this or another worker (and was nack'ed).
     pub fn redelivered(&self) -> bool {

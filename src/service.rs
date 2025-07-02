@@ -164,9 +164,7 @@ where
 {
     let delivery_tag = delivery.tag();
     let message_type = delivery.routing_key().to_owned();
-    let conversation_id = delivery
-        .conversation_id()
-        .unwrap_or_else(|| "").to_owned();
+    let conversation_id = delivery.conversation_id().unwrap_or_else(|| "").to_owned();
     match callback(endpoint, delivery) {
         Ok(configured) => {
             endpoint.ack_delivery(delivery_tag)?;
