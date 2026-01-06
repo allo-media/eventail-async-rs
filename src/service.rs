@@ -125,7 +125,7 @@ where
         Ok(_) => endpoint.delivery_processed(delivery_tag),
         Err(Error::Recoverable(msg)) => {
             endpoint.log(
-                Criticity::Critical,
+                Criticity::Alert,
                 &format!("Error processing {message_type}"),
                 &msg,
                 &conversation_id,
@@ -204,7 +204,7 @@ where
         Ok(_) => endpoint.delivery_processed(delivery_tag),
         Err(Error::Recoverable(msg)) => {
             endpoint.log(
-                Criticity::Critical,
+                Criticity::Alert,
                 &format!("Error processing {message_type}"),
                 &msg,
                 &conversation_id,
