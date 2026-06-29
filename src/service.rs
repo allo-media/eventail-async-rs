@@ -112,10 +112,10 @@ pub async fn run_service<T: Service>(
 pub fn safely_apply_sync<F>(
     endpoint: &EndpointHandle,
     delivery: Box<Delivery>,
-    mut callback: F,
+    callback: F,
 ) -> Result<(), EError>
 where
-    F: FnMut(&EndpointHandle, Box<Delivery>) -> Result<(), Error>,
+    F: FnOnce(&EndpointHandle, Box<Delivery>) -> Result<(), Error>,
 {
     let delivery_tag = delivery.tag();
     let message_type = delivery.routing_key().to_owned();
@@ -164,7 +164,7 @@ where
 {
     let delivery_tag = delivery.tag();
     let message_type = delivery.routing_key().to_owned();
-    let conversation_id = delivery.conversation_id().unwrap_or_else(|| "").to_owned();
+    let conversation_id = delivery.conversation_id().unwrap_or("").to_owned();
     match callback(endpoint, delivery) {
         Ok(configured) => {
             endpoint.ack_delivery(delivery_tag)?;
@@ -190,10 +190,10 @@ where
 pub async fn safely_apply<'a, F, Fut>(
     endpoint: &'a EndpointHandle,
     delivery: Box<Delivery>,
-    mut callback: F,
+    callback: F,
 ) -> Result<(), EError>
 where
-    F: FnMut(&'a EndpointHandle, Box<Delivery>) -> Fut,
+    F: FnOnce(&'a EndpointHandle, Box<Delivery>) -> Fut,
     Fut: std::future::Future<Output = Result<(), Error>>,
 {
     let delivery_tag = delivery.tag();
